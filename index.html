@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="uk">
 <head>
@@ -6,6 +7,9 @@
 <title>TradeLog Pro</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -206,6 +210,19 @@ const SAMPLE_PAYOUTS = [
 ];
 
 // ═══════════════════════════════════════════
+//  FIREBASE CONFIG  ← вставте свій конфіг
+// ═══════════════════════════════════════════
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAbByHZSycmiqBRuaCZUhp_j-P2L7l6ThQ",
+  authDomain: "tradingjournal-e774c.firebaseapp.com",
+  projectId: "tradingjournal-e774c",
+  storageBucket: "tradingjournal-e774c.firebasestorage.app",
+  messagingSenderId: "204436550710",
+  appId: "1:204436550710:web:9c6fa251f08e93950a1497",
+  measurementId: "G-51X3E3KK6E"
+};
+
+// ═══════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════
 function migrateTradeSchema(t) {
@@ -218,26 +235,89 @@ function migrateTradeSchema(t) {
   if (t.rr===undefined)    t.rr   = null;
   return t;
 }
-function loadState() {
-  try {
-    const trades  = JSON.parse(localStorage.getItem('tl_trades'))  || [...SAMPLE_TRADES];
-    const payouts = JSON.parse(localStorage.getItem('tl_payouts')) || [...SAMPLE_PAYOUTS];
-    return {trades: trades.map(migrateTradeSchema), payouts};
-  } catch(e) { return {trades: SAMPLE_TRADES.map(migrateTradeSchema), payouts:[...SAMPLE_PAYOUTS]}; }
-}
+
 let ST = {
-  ...loadState(),
+  trades: [], payouts: [],
   activeTab:'dashboard', modal:null,
   detailId:null, detailTf:'D',
   filter:{account:'all',status:'all',pair:'all',session:'all'},
   chartRefs:{},
+  dbReady: false,
 };
-function save() {
+
+// ── Firebase init ────────────────────────────
+let db = null;
+
+function initFirebase() {
   try {
-    localStorage.setItem('tl_trades',  JSON.stringify(ST.trades));
-    localStorage.setItem('tl_payouts', JSON.stringify(ST.payouts));
-  } catch(e) { alert('localStorage full — видаліть старі скріни або перенесіть в Firebase.'); }
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+
+    // Show loading indicator
+    document.getElementById('content').innerHTML =
+      `<div style="text-align:center;padding:60px;color:var(--t2)">
+        <div style="font-size:13px;margin-bottom:8px">Підключення до Firebase…</div>
+        <div style="color:var(--t3);font-size:11px">Перевірте FIREBASE_CONFIG якщо завантаження не відбувається</div>
+       </div>`;
+
+    // onSnapshot: real-time trades
+    db.collection('trades').onSnapshot(snap => {
+      ST.trades = snap.docs.map(d => migrateTradeSchema({id: d.id, ...d.data()}));
+      ST.dbReady = true;
+      renderAll();
+    }, err => {
+      showDbError(err);
+    });
+
+    // onSnapshot: real-time payouts
+    db.collection('payouts').onSnapshot(snap => {
+      ST.payouts = snap.docs.map(d => ({id: d.id, ...d.data()}));
+      renderAll();
+    }, err => {
+      console.warn('payouts error', err);
+    });
+
+  } catch(e) {
+    showDbError(e);
+  }
 }
+
+function showDbError(e) {
+  document.getElementById('content').innerHTML =
+    `<div style="background:rgba(244,63,94,.08);border:1px solid rgba(244,63,94,.3);border-radius:8px;padding:20px;margin:20px;color:var(--red)">
+      <div style="font-weight:700;margin-bottom:8px">⚠ Firebase помилка</div>
+      <div style="font-size:12px;margin-bottom:12px;color:var(--t2)">${e.message||e}</div>
+      <div style="font-size:11px;color:var(--t3)">
+        1. Переконайтесь що FIREBASE_CONFIG заповнений правильно<br>
+        2. Firestore Database створена в Firebase Console<br>
+        3. Rules дозволяють читання/запис (або підключена авторизація)
+      </div>
+     </div>`;
+}
+
+// ── DB writes ────────────────────────────────
+async function dbSetTrade(trade) {
+  if (!db) return;
+  const {id, ...data} = trade;
+  await db.collection('trades').doc(id).set(data);
+}
+async function dbDeleteTrade(id) {
+  if (!db) return;
+  await db.collection('trades').doc(id).delete();
+}
+async function dbSetPayout(payout) {
+  if (!db) return;
+  const {id, ...data} = payout;
+  await db.collection('payouts').doc(id).set(data);
+}
+async function dbDeletePayout(id) {
+  if (!db) return;
+  await db.collection('payouts').doc(id).delete();
+}
+
+// Legacy stub — not used with Firebase but kept for safety
+function save() {}
+
 
 // ═══════════════════════════════════════════
 //  CALC
@@ -645,17 +725,16 @@ function resolveImageUrl(raw) {
 }
 
 // Screenshot handling — URL based
-function applyScreenUrl(tfKey){
+async function applyScreenUrl(tfKey){
   const input=document.getElementById('url-'+tfKey);
   if(!input) return;
   const resolved = resolveImageUrl(input.value);
   if (!resolved) return;
-  // update the input field to show the resolved URL
   input.value = resolved;
   const t=ST.trades.find(x=>x.id===ST.detailId);
   if(!t) return;
   t.analysis[tfKey].screen=resolved;
-  save();
+  await dbSetTrade(t);
   refreshTfPanel(t,tfKey);
   flashSaved();
 }
@@ -670,11 +749,11 @@ function onScreenUrlPaste(tfKey, e){
   }, 0);
 }
 
-function delScreen(tfKey){
+async function delScreen(tfKey){
   const t=ST.trades.find(x=>x.id===ST.detailId);
   if(!t) return;
   t.analysis[tfKey].screen='';
-  save();
+  await dbSetTrade(t);
   refreshTfPanel(t,tfKey);
 }
 
@@ -710,7 +789,7 @@ function showScreenFallback(tfKey, url){
   }
 }
 
-function saveTradeDetail(){
+async function saveTradeDetail(){
   const t=ST.trades.find(x=>x.id===ST.detailId);
   if(!t) return;
   t.notes=document.getElementById('d-notes')?.value||'';
@@ -720,9 +799,9 @@ function saveTradeDetail(){
     if(noteEl) t.analysis[tf.key].note=noteEl.value;
     if(urlEl&&urlEl.value.trim()) t.analysis[tf.key].screen=resolveImageUrl(urlEl.value.trim());
   });
-  save();
+  await dbSetTrade(t);
   flashSaved();
-  renderHeader(); // refresh P&L pills
+  renderHeader();
 }
 
 function flashSaved(){
@@ -732,25 +811,24 @@ function flashSaved(){
   });
 }
 
-function setQuality(n){
+async function setQuality(n){
   const t=ST.trades.find(x=>x.id===ST.detailId);
   if(!t) return;
   t.quality=n;
-  save();
-  // refresh stars
+  await dbSetTrade(t);
   const stars=document.getElementById('d-stars');
   if(stars) stars.innerHTML=[1,2,3,4,5].map(i=>`<span class="star ${n>=i?'on':''}" onclick="setQuality(${i})">${n>=i?'★':'☆'}</span>`).join('');
   flashSaved();
 }
 
-function toggleEmo(e){
+async function toggleEmo(e){
   const t=ST.trades.find(x=>x.id===ST.detailId);
   if(!t) return;
   const arr=t.emotions||[];
   const idx=arr.indexOf(e);
   if(idx>=0) arr.splice(idx,1); else arr.push(e);
   t.emotions=[...arr];
-  save();
+  await dbSetTrade(t);
   document.querySelectorAll('.emo-pill').forEach(p=>{
     p.classList.toggle('on',t.emotions.includes(p.textContent));
   });
@@ -1014,14 +1092,14 @@ function formAddPayout(){
 // ═══════════════════════════════════════════
 //  CRUD
 // ═══════════════════════════════════════════
-function submitTrade(){
+async function submitTrade(){
   const date=document.getElementById('f-date').value;
   const pnl=parseFloat(document.getElementById('f-pnl').value);
   const status=document.getElementById('f-status').value;
   if(!date) return alert('Enter a date');
   const corr=(!isNaN(pnl)&&pnl>0&&status==='Lose')?'Win':(!isNaN(pnl)&&pnl<0&&status==='Win')?'Lose':status;
-  ST.trades.unshift({
-    id:'t'+Date.now(),date,
+  const trade = {
+    id:'t'+Date.now(), date,
     account:document.getElementById('f-acct').value,
     pair:document.getElementById('f-pair').value,
     direction:document.getElementById('f-dir').value,
@@ -1030,23 +1108,33 @@ function submitTrade(){
     profitCash:isNaN(pnl)?0:pnl,
     risk:parseFloat(document.getElementById('f-risk').value)||null,
     rr:parseFloat(document.getElementById('f-rr').value)||null,
-    status:corr,notes:'',emotions:[],quality:0,analysis:emptyAnalysis()
-  });
-  save();closeModal();renderAll();
+    status:corr, notes:'', emotions:[], quality:0, analysis:emptyAnalysis()
+  };
+  closeModal();
+  await dbSetTrade(trade); // onSnapshot автоматично оновить UI
 }
-function delTrade(id){
-  ST.trades=ST.trades.filter(t=>t.id!==id);
-  save();renderAll();
+
+async function delTrade(id){
+  await dbDeleteTrade(id);
 }
-function submitPayout(){
+
+async function submitPayout(){
   const gross=parseFloat(document.getElementById('p-gross').value)||0;
   const split=parseFloat(document.getElementById('p-split').value)||80;
-  ST.payouts.unshift({id:'p'+Date.now(),date:document.getElementById('p-date').value,account:document.getElementById('p-acct').value,gross,split,net:+(gross*split/100).toFixed(2),note:document.getElementById('p-note').value||'Payout'});
-  save();closeModal();renderAll();
+  const payout = {
+    id:'p'+Date.now(),
+    date:document.getElementById('p-date').value,
+    account:document.getElementById('p-acct').value,
+    gross, split, net:+(gross*split/100).toFixed(2),
+    note:document.getElementById('p-note').value||'Payout'
+  };
+  closeModal();
+  await dbSetPayout(payout);
 }
-function delPayout(id){
-  if(!confirm('Delete this payout?'))return;
-  ST.payouts=ST.payouts.filter(p=>p.id!==id);save();renderAll();
+
+async function delPayout(id){
+  if(!confirm('Delete this payout?')) return;
+  await dbDeletePayout(id);
 }
 function calcNet(){
   const g=parseFloat(document.getElementById('p-gross').value)||0;
@@ -1073,7 +1161,9 @@ function renderAll(){
   renderHeader();
   renderContent();
 }
-renderAll();
+// Boot — Firebase
+initFirebase();
+
 </script>
 </body>
 </html>
