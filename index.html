@@ -213,13 +213,12 @@ const SAMPLE_PAYOUTS = [
 //  FIREBASE CONFIG  ← вставте свій конфіг
 // ═══════════════════════════════════════════
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAbByHZSycmiqBRuaCZUhp_j-P2L7l6ThQ",
-  authDomain: "tradingjournal-e774c.firebaseapp.com",
-  projectId: "tradingjournal-e774c",
-  storageBucket: "tradingjournal-e774c.firebasestorage.app",
-  messagingSenderId: "204436550710",
-  appId: "1:204436550710:web:9c6fa251f08e93950a1497",
-  measurementId: "G-51X3E3KK6E"
+  apiKey:            "ВСТАВТЕ_ВАШ_API_KEY",
+  authDomain:        "ВАШПРОЕКТ.firebaseapp.com",
+  projectId:         "ВАШПРОЕКТ",
+  storageBucket:     "ВАШПРОЕКТ.appspot.com",
+  messagingSenderId: "XXXXXXXXXX",
+  appId:             "1:XXXXXXXXXX:web:XXXXXXXXXX"
 };
 
 // ═══════════════════════════════════════════
@@ -261,7 +260,7 @@ function initFirebase() {
        </div>`;
 
     // onSnapshot: real-time trades
-    db.collection('trades').onSnapshot(snap => {
+    db.collection('trades_pro').onSnapshot(snap => {
       ST.trades = snap.docs.map(d => migrateTradeSchema({id: d.id, ...d.data()}));
       ST.dbReady = true;
       renderAll();
@@ -270,7 +269,7 @@ function initFirebase() {
     });
 
     // onSnapshot: real-time payouts
-    db.collection('payouts').onSnapshot(snap => {
+    db.collection('payouts_pro').onSnapshot(snap => {
       ST.payouts = snap.docs.map(d => ({id: d.id, ...d.data()}));
       renderAll();
     }, err => {
@@ -299,20 +298,20 @@ function showDbError(e) {
 async function dbSetTrade(trade) {
   if (!db) return;
   const {id, ...data} = trade;
-  await db.collection('trades').doc(id).set(data);
+  await db.collection('trades_pro').doc(id).set(data);
 }
 async function dbDeleteTrade(id) {
   if (!db) return;
-  await db.collection('trades').doc(id).delete();
+  await db.collection('trades_pro').doc(id).delete();
 }
 async function dbSetPayout(payout) {
   if (!db) return;
   const {id, ...data} = payout;
-  await db.collection('payouts').doc(id).set(data);
+  await db.collection('payouts_pro').doc(id).set(data);
 }
 async function dbDeletePayout(id) {
   if (!db) return;
-  await db.collection('payouts').doc(id).delete();
+  await db.collection('payouts_pro').doc(id).delete();
 }
 
 // Legacy stub — not used with Firebase but kept for safety
